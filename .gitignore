@@ -1,0 +1,40 @@
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Configuration files with sensitive information
+#includes/config.php
+
+# Cache and session files
+/cache/
+/sessions/
+
+# Log files
+*.log
+/logs/
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Dependency directories
+/node_modules/
+/vendor/
+
+# Build directories
+/dist/
+/build/
+/public/uploads/
+
+# Composer files
+composer.phar 
