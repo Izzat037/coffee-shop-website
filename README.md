@@ -42,4 +42,4 @@ This project is available for personal and educational use.
 
 ## Credits
 
-Developed by [Your Name] 
+Developed by Izzat Samsuddin
