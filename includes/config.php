@@ -37,12 +37,12 @@ function sanitize($data) {
 
 // Function to check if user is logged in
 function isLoggedIn() {
-    return isset($_SESSION['user_id']);
+    return isset($_SESSION['user_id']) || isset($_SESSION['admin_id']);
 }
 
 // Function to check if user is admin
 function isAdmin() {
-    return isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
+    return (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin') || isset($_SESSION['admin_id']);
 }
 
 // Function to redirect to a page

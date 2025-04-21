@@ -39,16 +39,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $token = bin2hex(random_bytes(32));
                     $expires = time() + (30 * 24 * 60 * 60); // 30 days
                     
-                    // Store token in database
-                    $sql = "UPDATE users SET remember_token = '$token' WHERE id = " . $user['id'];
-                    $conn->query($sql);
+                    // Check if remember_token column exists
+                    $checkColumn = $conn->query("SHOW COLUMNS FROM users LIKE 'remember_token'");
+                    if ($checkColumn && $checkColumn->num_rows > 0) {
+                        // Store token in database if column exists
+                        $sql = "UPDATE users SET remember_token = '$token' WHERE id = " . $user['id'];
+                        $conn->query($sql);
+                    } else {
+                        // If column doesn't exist, just use the cookie without database storage
+                        // In production, you should create this column in the database
+                        $_SESSION['info_message'] = "Remember me functionality is limited. Please contact the administrator.";
+                    }
                     
-                    // Set cookie
+                    // Set cookies regardless
                     setcookie('remember_token', $token, $expires, '/');
                     setcookie('remember_user', $user['id'], $expires, '/');
                 }
                 
                 $_SESSION['success_message'] = "Welcome back, " . $user['name'] . "!";
+                
+                // Set info message if it exists
+                if (isset($_SESSION['info_message'])) {
+                    // We'll just leave the info message in the session to be displayed after redirect
+                }
                 
                 // Redirect to intended page or home
                 $redirect = isset($_SESSION['redirect_after_login']) ? $_SESSION['redirect_after_login'] : SITE_URL . '/index.php';
@@ -87,7 +100,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             
                             <div class="mb-3">
                                 <label for="password" class="form-label">Password</label>
-                                <input type="password" class="form-control" id="password" name="password" required>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="password" name="password" required>
+                                    <button class="btn btn-outline-secondary toggle-password" type="button" data-target="password">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
                                 <div class="invalid-feedback">
                                     Please enter your password.
                                 </div>
@@ -114,4 +132,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 </section>
 
-<?php require_once 'includes/footer.php'; ?> 
+<?php require_once 'includes/footer.php'; ?>
+
+<script>
+    // Show/hide password functionality
+    document.addEventListener('DOMContentLoaded', function() {
+        const toggleButtons = document.querySelectorAll('.toggle-password');
+        
+        toggleButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const targetId = this.getAttribute('data-target');
+                const passwordInput = document.getElementById(targetId);
+                const icon = this.querySelector('i');
+                
+                if (passwordInput.type === 'password') {
+                    passwordInput.type = 'text';
+                    icon.classList.remove('fa-eye');
+                    icon.classList.add('fa-eye-slash');
+                } else {
+                    passwordInput.type = 'password';
+                    icon.classList.remove('fa-eye-slash');
+                    icon.classList.add('fa-eye');
+                }
+            });
+        });
+    });
+</script> 

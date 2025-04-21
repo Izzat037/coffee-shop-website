@@ -59,7 +59,18 @@
                         <?php if(isLoggedIn()): ?>
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                                    <i class="fas fa-user"></i> <?php echo $_SESSION['user_name']; ?>
+                                    <i class="fas fa-user"></i> 
+                                    <?php 
+                                    $displayName = 'Account';
+                                    if(isset($_SESSION['user_name'])) {
+                                        $displayName = $_SESSION['user_name'];
+                                    } elseif(isset($_SESSION['admin_username'])) {
+                                        $displayName = $_SESSION['admin_username'];
+                                    } elseif(isset($_SESSION['user_email'])) {
+                                        $displayName = $_SESSION['user_email'];
+                                    }
+                                    echo $displayName;
+                                    ?>
                                 </a>
                                 <ul class="dropdown-menu">
                                     <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>/profile.php">My Profile</a></li>
@@ -99,4 +110,12 @@
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
             <?php unset($_SESSION['error_message']); ?>
+        <?php endif; ?>
+        
+        <?php if(isset($_SESSION['info_message'])): ?>
+            <div class="alert alert-info alert-dismissible fade show">
+                <?php echo $_SESSION['info_message']; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            <?php unset($_SESSION['info_message']); ?>
         <?php endif; ?> 
