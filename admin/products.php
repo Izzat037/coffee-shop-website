@@ -1,4 +1,9 @@
 <?php
+// Enable error reporting for debugging
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 require_once '../includes/config.php';
 require_once 'admin_header.php';
 
@@ -12,31 +17,29 @@ if (!isAdmin()) {
 $conn = connectDB();
 
 // Handle product deletion
-if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
-    $productId = (int)$_GET['delete'];
+if (isset($_GET['action']) && $_GET['action'] == 'delete' && isset($_GET['id'])) {
+    $product_id = $_GET['id'];
     
-    // Get product image before deletion to remove the file
-    $sql = "SELECT image FROM products WHERE id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $productId);
+    // Get product image before deleting
+    $imgSql = "SELECT image FROM products WHERE id = ?";
+    $stmt = $conn->prepare($imgSql);
+    $stmt->bind_param("i", $product_id);
     $stmt->execute();
     $result = $stmt->get_result();
     
-    if ($result->num_rows > 0) {
-        $product = $result->fetch_assoc();
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $image = $row['image'];
         
-        // Delete the product from database
+        // Delete the product
         $deleteSql = "DELETE FROM products WHERE id = ?";
-        $deleteStmt = $conn->prepare($deleteSql);
-        $deleteStmt->bind_param("i", $productId);
+        $stmt = $conn->prepare($deleteSql);
+        $stmt->bind_param("i", $product_id);
         
-        if ($deleteStmt->execute()) {
-            // Delete image file if exists
-            if (!empty($product['image'])) {
-                $imagePath = "../uploads/products/" . $product['image'];
-                if (file_exists($imagePath)) {
-                    unlink($imagePath);
-                }
+        if ($stmt->execute()) {
+            // Delete product image if it exists and is not the default image
+            if ($image && $image != 'default.jpg' && file_exists("../uploads/products/" . $image)) {
+                unlink("../uploads/products/" . $image);
             }
             
             $_SESSION['success_message'] = "Product deleted successfully!";
@@ -47,201 +50,168 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
         $_SESSION['error_message'] = "Product not found.";
     }
     
-    // Redirect to avoid resubmission on refresh
+    // Redirect to remove the action from URL (to prevent accidental refreshes)
     redirect(SITE_URL . '/admin/products.php');
 }
 
-// Set up pagination
-$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$recordsPerPage = 10;
-$offset = ($page - 1) * $recordsPerPage;
+// Determine sort order
+$sort = isset($_GET['sort']) ? $_GET['sort'] : 'id_desc';
+$sortColumn = 'id';
+$sortDirection = 'DESC';
 
-// Get the total number of products
-$countSql = "SELECT COUNT(*) as total FROM products";
-$countResult = $conn->query($countSql);
-$totalRecords = $countResult->fetch_assoc()['total'];
-$totalPages = ceil($totalRecords / $recordsPerPage);
+switch ($sort) {
+    case 'name_asc':
+        $sortColumn = 'name';
+        $sortDirection = 'ASC';
+        break;
+    case 'name_desc':
+        $sortColumn = 'name';
+        $sortDirection = 'DESC';
+        break;
+    case 'price_asc':
+        $sortColumn = 'price';
+        $sortDirection = 'ASC';
+        break;
+    case 'price_desc':
+        $sortColumn = 'price';
+        $sortDirection = 'DESC';
+        break;
+    case 'stock_asc':
+        $sortColumn = 'stock';
+        $sortDirection = 'ASC';
+        break;
+    case 'stock_desc':
+        $sortColumn = 'stock';
+        $sortDirection = 'DESC';
+        break;
+    case 'id_asc':
+        $sortColumn = 'id';
+        $sortDirection = 'ASC';
+        break;
+    default:
+        $sortColumn = 'id';
+        $sortDirection = 'DESC';
+}
 
-// Get search and filter values
+// Search functionality
 $search = isset($_GET['search']) ? $_GET['search'] : '';
-$category = isset($_GET['category']) ? $_GET['category'] : '';
-$featured = isset($_GET['featured']) ? $_GET['featured'] : '';
-$sort = isset($_GET['sort']) ? $_GET['sort'] : 'name_asc';
-
-// Build the query
-$sql = "SELECT * FROM products WHERE 1=1";
+$searchCondition = '';
 $params = [];
-$types = "";
+$types = '';
 
-// Add search condition if search term is provided
 if (!empty($search)) {
-    $sql .= " AND (name LIKE ? OR description LIKE ?)";
-    $searchParam = "%$search%";
-    $params[] = $searchParam;
-    $params[] = $searchParam;
-    $types .= "ss";
+    $searchCondition = "WHERE name LIKE ? OR description LIKE ?";
+    $searchParam = "%" . $search . "%";
+    $params = [$searchParam, $searchParam];
+    $types = "ss";
 }
 
-// Add category filter if selected
-if (!empty($category)) {
-    $sql .= " AND category = ?";
-    $params[] = $category;
-    $types .= "s";
-}
-
-// Add featured filter if selected
-if ($featured !== '') {
-    $sql .= " AND is_featured = ?";
-    $params[] = $featured;
+// Filter by category
+$category_id = isset($_GET['category']) ? intval($_GET['category']) : 0;
+if ($category_id > 0) {
+    $searchCondition = $searchCondition ? $searchCondition . " AND category_id = ?" : "WHERE category_id = ?";
+    $params[] = $category_id;
     $types .= "i";
 }
 
-// Add sorting
-switch ($sort) {
-    case 'name_desc':
-        $sql .= " ORDER BY name DESC";
-        break;
-    case 'price_asc':
-        $sql .= " ORDER BY price ASC";
-        break;
-    case 'price_desc':
-        $sql .= " ORDER BY price DESC";
-        break;
-    case 'stock_asc':
-        $sql .= " ORDER BY stock ASC";
-        break;
-    case 'stock_desc':
-        $sql .= " ORDER BY stock DESC";
-        break;
-    case 'newest':
-        $sql .= " ORDER BY id DESC";
-        break;
-    case 'oldest':
-        $sql .= " ORDER BY id ASC";
-        break;
-    default:
-        $sql .= " ORDER BY name ASC";
-}
+// Pagination
+$page = isset($_GET['page']) ? intval($_GET['page']) : 1;
+$perPage = 10;
+$offset = ($page - 1) * $perPage;
 
-// Add pagination limit
-$sql .= " LIMIT ?, ?";
-$params[] = $offset;
-$params[] = $recordsPerPage;
-$types .= "ii";
-
-// Prepare and execute the query
-$stmt = $conn->prepare($sql);
+// Count total products for pagination
+$countSql = "SELECT COUNT(*) as total FROM products " . $searchCondition;
 if (!empty($params)) {
+    $stmt = $conn->prepare($countSql);
     $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $countResult = $stmt->get_result();
+    $totalProducts = $countResult->fetch_assoc()['total'];
+} else {
+    $countResult = $conn->query($countSql);
+    $totalProducts = $countResult->fetch_assoc()['total'];
 }
+
+$totalPages = ceil($totalProducts / $perPage);
+
+// Get products with pagination and sorting
+$sql = "SELECT p.*, c.name as category_name 
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+        $searchCondition
+        ORDER BY $sortColumn $sortDirection
+        LIMIT ?, ?";
+
+$stmt = $conn->prepare($sql);
+$limitTypes = $types . "ii";
+$limitParams = array_merge($params, [$offset, $perPage]);
+$stmt->bind_param($limitTypes, ...$limitParams);
 $stmt->execute();
 $result = $stmt->get_result();
 
 // Get all categories for filter dropdown
-$categorySql = "SELECT DISTINCT category FROM products ORDER BY category";
-$categoryResult = $conn->query($categorySql);
-$categories = [];
-
-if ($categoryResult && $categoryResult->num_rows > 0) {
-    while ($row = $categoryResult->fetch_assoc()) {
-        $categories[] = $row['category'];
-    }
-}
-
-$conn->close();
+$categoriesSql = "SELECT * FROM categories ORDER BY name ASC";
+$categoriesResult = $conn->query($categoriesSql);
 ?>
 
-<div class="container-fluid">
-    <div class="d-sm-flex align-items-center justify-content-between mb-4">
-        <h1 class="h3 mb-0 text-gray-800">Product Management</h1>
-        <a href="<?php echo SITE_URL; ?>/admin/add-product.php" class="d-none d-sm-inline-block btn btn-sm btn-primary shadow-sm">
-            <i class="fas fa-plus fa-sm text-white-50"></i> Add New Product
-        </a>
-    </div>
+<!-- Page Heading -->
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">Products Management</h1>
+    <a href="<?php echo SITE_URL; ?>/admin/add-product.php" class="btn btn-primary">
+        <i class="fas fa-plus fa-sm text-white-50 me-1"></i> Add New Product
+    </a>
+</div>
 
-    <!-- Display success message if any -->
-    <?php if (isset($_SESSION['success_message'])): ?>
-        <div class="alert alert-success">
-            <?php 
-                echo $_SESSION['success_message']; 
-                unset($_SESSION['success_message']);
-            ?>
-        </div>
-    <?php endif; ?>
-
-    <!-- Display error message if any -->
-    <?php if (isset($_SESSION['error_message'])): ?>
-        <div class="alert alert-danger">
-            <?php 
-                echo $_SESSION['error_message']; 
-                unset($_SESSION['error_message']);
-            ?>
-        </div>
-    <?php endif; ?>
-
-    <!-- Product List Card -->
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-            <h6 class="m-0 font-weight-bold text-primary">All Products</h6>
-            <div class="dropdown no-arrow">
-                <a class="dropdown-toggle" href="#" role="button" id="dropdownMenuLink" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                    <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
-                </a>
-                <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in" aria-labelledby="dropdownMenuLink">
-                    <div class="dropdown-header">Export Options:</div>
-                    <a class="dropdown-item" href="#"><i class="fas fa-file-csv fa-sm fa-fw mr-2 text-gray-400"></i> Export CSV</a>
-                    <a class="dropdown-item" href="#"><i class="fas fa-file-excel fa-sm fa-fw mr-2 text-gray-400"></i> Export Excel</a>
-                    <div class="dropdown-divider"></div>
-                    <a class="dropdown-item" href="#"><i class="fas fa-print fa-sm fa-fw mr-2 text-gray-400"></i> Print List</a>
-                </div>
+<!-- Search and Filter -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="<?php echo SITE_URL; ?>/admin/products.php" class="row align-items-end">
+            <div class="col-md-4 mb-3">
+                <label for="search" class="form-label">Search Products</label>
+                <input type="text" name="search" id="search" class="form-control" placeholder="Search by name or description" value="<?php echo htmlspecialchars($search); ?>">
             </div>
-        </div>
-        <div class="card-body">
-            <!-- Search and Filters -->
-            <form method="GET" action="<?php echo SITE_URL; ?>/admin/products.php" class="mb-4">
-                <div class="row">
-                    <div class="col-md-3 mb-2">
-                        <input type="text" class="form-control" name="search" placeholder="Search products..." value="<?php echo htmlspecialchars($search); ?>">
-                    </div>
-                    <div class="col-md-2 mb-2">
-                        <select class="form-control" name="category">
-                            <option value="">All Categories</option>
-                            <?php foreach ($categories as $cat): ?>
-                                <option value="<?php echo $cat; ?>" <?php echo ($category === $cat) ? 'selected' : ''; ?>>
-                                    <?php echo ucfirst($cat); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="col-md-2 mb-2">
-                        <select class="form-control" name="featured">
-                            <option value="">All Products</option>
-                            <option value="1" <?php echo ($featured === '1') ? 'selected' : ''; ?>>Featured Only</option>
-                            <option value="0" <?php echo ($featured === '0') ? 'selected' : ''; ?>>Not Featured</option>
-                        </select>
-                    </div>
-                    <div class="col-md-2 mb-2">
-                        <select class="form-control" name="sort">
-                            <option value="name_asc" <?php echo ($sort === 'name_asc') ? 'selected' : ''; ?>>Name (A-Z)</option>
-                            <option value="name_desc" <?php echo ($sort === 'name_desc') ? 'selected' : ''; ?>>Name (Z-A)</option>
-                            <option value="price_asc" <?php echo ($sort === 'price_asc') ? 'selected' : ''; ?>>Price (Low-High)</option>
-                            <option value="price_desc" <?php echo ($sort === 'price_desc') ? 'selected' : ''; ?>>Price (High-Low)</option>
-                            <option value="stock_asc" <?php echo ($sort === 'stock_asc') ? 'selected' : ''; ?>>Stock (Low-High)</option>
-                            <option value="stock_desc" <?php echo ($sort === 'stock_desc') ? 'selected' : ''; ?>>Stock (High-Low)</option>
-                            <option value="newest" <?php echo ($sort === 'newest') ? 'selected' : ''; ?>>Newest First</option>
-                            <option value="oldest" <?php echo ($sort === 'oldest') ? 'selected' : ''; ?>>Oldest First</option>
-                        </select>
-                    </div>
-                    <div class="col-md-3 mb-2">
-                        <button type="submit" class="btn btn-primary">Filter</button>
-                        <a href="<?php echo SITE_URL; ?>/admin/products.php" class="btn btn-secondary">Reset</a>
-                    </div>
-                </div>
-            </form>
+            <div class="col-md-3 mb-3">
+                <label for="category" class="form-label">Filter by Category</label>
+                <select name="category" id="category" class="form-select">
+                    <option value="">All Categories</option>
+                    <?php if ($categoriesResult && $categoriesResult->num_rows > 0): ?>
+                        <?php while ($category = $categoriesResult->fetch_assoc()): ?>
+                            <option value="<?php echo $category['id']; ?>" <?php echo ($category_id == $category['id']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($category['name']); ?>
+                            </option>
+                        <?php endwhile; ?>
+                    <?php endif; ?>
+                </select>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label for="sort" class="form-label">Sort By</label>
+                <select name="sort" id="sort" class="form-select">
+                    <option value="id_desc" <?php echo ($sort == 'id_desc') ? 'selected' : ''; ?>>Newest First</option>
+                    <option value="id_asc" <?php echo ($sort == 'id_asc') ? 'selected' : ''; ?>>Oldest First</option>
+                    <option value="name_asc" <?php echo ($sort == 'name_asc') ? 'selected' : ''; ?>>Name (A-Z)</option>
+                    <option value="name_desc" <?php echo ($sort == 'name_desc') ? 'selected' : ''; ?>>Name (Z-A)</option>
+                    <option value="price_asc" <?php echo ($sort == 'price_asc') ? 'selected' : ''; ?>>Price (Low to High)</option>
+                    <option value="price_desc" <?php echo ($sort == 'price_desc') ? 'selected' : ''; ?>>Price (High to Low)</option>
+                    <option value="stock_asc" <?php echo ($sort == 'stock_asc') ? 'selected' : ''; ?>>Stock (Low to High)</option>
+                    <option value="stock_desc" <?php echo ($sort == 'stock_desc') ? 'selected' : ''; ?>>Stock (High to Low)</option>
+                </select>
+            </div>
+            <div class="col-md-2 mb-3">
+                <button type="submit" class="btn btn-primary w-100">Apply Filters</button>
+            </div>
+        </form>
+    </div>
+</div>
 
-            <!-- Products Table -->
+<!-- Products Table -->
+<div class="card mb-4">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">Products List</h6>
+    </div>
+    <div class="card-body">
+        <?php if ($result && $result->num_rows > 0): ?>
             <div class="table-responsive">
-                <table class="table table-bordered" id="productsTable" width="100%" cellspacing="0">
+                <table class="table table-bordered" width="100%" cellspacing="0">
                     <thead>
                         <tr>
                             <th>ID</th>
@@ -250,124 +220,105 @@ $conn->close();
                             <th>Category</th>
                             <th>Price</th>
                             <th>Stock</th>
-                            <th>Featured</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if ($result->num_rows > 0): ?>
-                            <?php while ($product = $result->fetch_assoc()): ?>
-                                <tr>
-                                    <td><?php echo $product['id']; ?></td>
-                                    <td>
-                                        <?php if (!empty($product['image'])): ?>
-                                            <img src="<?php echo SITE_URL; ?>/uploads/products/<?php echo $product['image']; ?>" 
-                                                 alt="<?php echo htmlspecialchars($product['name']); ?>" 
-                                                 class="img-thumbnail" style="max-height: 50px;">
-                                        <?php else: ?>
-                                            <span class="text-muted">No image</span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td><?php echo htmlspecialchars($product['name']); ?></td>
-                                    <td><?php echo htmlspecialchars($product['category']); ?></td>
-                                    <td>$<?php echo number_format($product['price'], 2); ?></td>
-                                    <td><?php echo $product['stock']; ?></td>
-                                    <td>
-                                        <?php if ($product['is_featured'] == 1): ?>
-                                            <span class="badge badge-success">Featured</span>
-                                        <?php else: ?>
-                                            <span class="badge badge-secondary">No</span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <a href="<?php echo SITE_URL; ?>/admin/edit-product.php?id=<?php echo $product['id']; ?>" 
-                                           class="btn btn-primary btn-sm">
-                                            <i class="fas fa-edit"></i>
-                                        </a>
-                                        <a href="#" class="btn btn-danger btn-sm delete-product" 
-                                           data-id="<?php echo $product['id']; ?>" 
-                                           data-name="<?php echo htmlspecialchars($product['name']); ?>">
-                                            <i class="fas fa-trash"></i>
-                                        </a>
-                                    </td>
-                                </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
+                        <?php while ($product = $result->fetch_assoc()): ?>
                             <tr>
-                                <td colspan="8" class="text-center">No products found.</td>
+                                <td><?php echo $product['id']; ?></td>
+                                <td>
+                                    <img src="<?php echo SITE_URL; ?>/uploads/products/<?php echo $product['image'] ?: 'default.jpg'; ?>" 
+                                         alt="<?php echo htmlspecialchars($product['name']); ?>" 
+                                         class="img-thumbnail" 
+                                         style="width: 50px; height: 50px; object-fit: cover;">
+                                </td>
+                                <td><?php echo htmlspecialchars($product['name']); ?></td>
+                                <td><?php echo htmlspecialchars($product['category_name'] ?? 'Uncategorized'); ?></td>
+                                <td>$<?php echo number_format($product['price'], 2); ?></td>
+                                <td>
+                                    <span class="badge bg-<?php echo $product['stock'] <= 0 ? 'danger' : ($product['stock'] < 5 ? 'warning' : 'success'); ?>">
+                                        <?php echo $product['stock']; ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <a href="<?php echo SITE_URL; ?>/admin/edit-product.php?id=<?php echo $product['id']; ?>" 
+                                       class="btn btn-primary btn-sm mb-1">
+                                        <i class="fas fa-edit"></i> Edit
+                                    </a>
+                                    <a href="<?php echo SITE_URL; ?>/product.php?id=<?php echo $product['id']; ?>" 
+                                       class="btn btn-info btn-sm mb-1" 
+                                       target="_blank">
+                                        <i class="fas fa-eye"></i> View
+                                    </a>
+                                    <a href="<?php echo SITE_URL; ?>/admin/products.php?action=delete&id=<?php echo $product['id']; ?>" 
+                                       class="btn btn-danger btn-sm mb-1 delete-product">
+                                        <i class="fas fa-trash"></i> Delete
+                                    </a>
+                                </td>
                             </tr>
-                        <?php endif; ?>
+                        <?php endwhile; ?>
                     </tbody>
                 </table>
             </div>
-
+            
             <!-- Pagination -->
             <?php if ($totalPages > 1): ?>
                 <nav aria-label="Page navigation">
-                    <ul class="pagination justify-content-center">
-                        <li class="page-item <?php echo ($page <= 1) ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="<?php echo SITE_URL; ?>/admin/products.php?page=<?php echo $page - 1; ?>&search=<?php echo urlencode($search); ?>&category=<?php echo urlencode($category); ?>&featured=<?php echo urlencode($featured); ?>&sort=<?php echo urlencode($sort); ?>" aria-label="Previous">
-                                <span aria-hidden="true">&laquo;</span>
-                            </a>
-                        </li>
+                    <ul class="pagination justify-content-center mt-4">
+                        <?php if ($page > 1): ?>
+                            <li class="page-item">
+                                <a class="page-link" href="<?php echo SITE_URL; ?>/admin/products.php?page=<?php echo ($page - 1); ?>&search=<?php echo urlencode($search); ?>&category=<?php echo $category_id; ?>&sort=<?php echo $sort; ?>">
+                                    Previous
+                                </a>
+                            </li>
+                        <?php endif; ?>
                         
                         <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                            <li class="page-item <?php echo ($page == $i) ? 'active' : ''; ?>">
-                                <a class="page-link" href="<?php echo SITE_URL; ?>/admin/products.php?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&category=<?php echo urlencode($category); ?>&featured=<?php echo urlencode($featured); ?>&sort=<?php echo urlencode($sort); ?>">
+                            <li class="page-item <?php echo ($i == $page) ? 'active' : ''; ?>">
+                                <a class="page-link" href="<?php echo SITE_URL; ?>/admin/products.php?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&category=<?php echo $category_id; ?>&sort=<?php echo $sort; ?>">
                                     <?php echo $i; ?>
                                 </a>
                             </li>
                         <?php endfor; ?>
                         
-                        <li class="page-item <?php echo ($page >= $totalPages) ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="<?php echo SITE_URL; ?>/admin/products.php?page=<?php echo $page + 1; ?>&search=<?php echo urlencode($search); ?>&category=<?php echo urlencode($category); ?>&featured=<?php echo urlencode($featured); ?>&sort=<?php echo urlencode($sort); ?>" aria-label="Next">
-                                <span aria-hidden="true">&raquo;</span>
-                            </a>
-                        </li>
+                        <?php if ($page < $totalPages): ?>
+                            <li class="page-item">
+                                <a class="page-link" href="<?php echo SITE_URL; ?>/admin/products.php?page=<?php echo ($page + 1); ?>&search=<?php echo urlencode($search); ?>&category=<?php echo $category_id; ?>&sort=<?php echo $sort; ?>">
+                                    Next
+                                </a>
+                            </li>
+                        <?php endif; ?>
                     </ul>
                 </nav>
             <?php endif; ?>
-        </div>
-    </div>
-</div>
-
-<!-- Delete Confirmation Modal -->
-<div class="modal fade" id="deleteModal" tabindex="-1" role="dialog" aria-labelledby="deleteModalLabel" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="deleteModalLabel">Confirm Deletion</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
+            
+        <?php else: ?>
+            <div class="alert alert-info text-center">
+                No products found. <?php echo !empty($search) || $category_id > 0 ? 'Try a different search or filter.' : ''; ?>
             </div>
-            <div class="modal-body">
-                Are you sure you want to delete the product: <strong id="product-name"></strong>?
-                <p class="text-danger mt-2">This action cannot be undone!</p>
+            <div class="text-center mt-3">
+                <a href="<?php echo SITE_URL; ?>/admin/add-product.php" class="btn btn-primary">
+                    <i class="fas fa-plus fa-sm text-white-50 me-1"></i> Add Your First Product
+                </a>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                <a href="#" class="btn btn-danger" id="confirm-delete">Delete</a>
-            </div>
-        </div>
+        <?php endif; ?>
     </div>
 </div>
 
 <script>
-    $(document).ready(function() {
-        // Delete product confirmation
-        $('.delete-product').click(function(e) {
-            e.preventDefault();
-            
-            const productId = $(this).data('id');
-            const productName = $(this).data('name');
-            
-            $('#product-name').text(productName);
-            $('#confirm-delete').attr('href', '<?php echo SITE_URL; ?>/admin/products.php?delete=' + productId);
-            
-            $('#deleteModal').modal('show');
+document.addEventListener('DOMContentLoaded', function() {
+    // Confirm before deleting a product
+    const deleteLinks = document.querySelectorAll('.delete-product');
+    
+    deleteLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            if (!confirm('Are you sure you want to delete this product? This action cannot be undone.')) {
+                e.preventDefault();
+            }
         });
     });
+});
 </script>
 
 <?php require_once 'admin_footer.php'; ?> 

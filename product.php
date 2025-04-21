@@ -63,10 +63,16 @@ if ($reviewCount > 0) {
 // Check if user has already reviewed this product
 $userHasReviewed = false;
 if (isLoggedIn()) {
-    $user_id = $_SESSION['user_id'];
-    $sql = "SELECT id FROM reviews WHERE user_id = $user_id AND product_id = $product_id";
-    $result = $conn->query($sql);
-    if ($result && $result->num_rows > 0) {
+    // Check if user_id is set in the session
+    if (isset($_SESSION['user_id'])) {
+        $user_id = $_SESSION['user_id'];
+        $sql = "SELECT id FROM reviews WHERE user_id = $user_id AND product_id = $product_id";
+        $result = $conn->query($sql);
+        if ($result && $result->num_rows > 0) {
+            $userHasReviewed = true;
+        }
+    } else if (isset($_SESSION['admin_id'])) {
+        // Admin users should not review products
         $userHasReviewed = true;
     }
 }
@@ -75,20 +81,26 @@ if (isLoggedIn()) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['rating']) && isLoggedIn() && !$userHasReviewed) {
     $rating = (int)$_POST['rating'];
     $comment = isset($_POST['comment']) ? sanitize($_POST['comment']) : '';
-    $user_id = $_SESSION['user_id'];
     
-    // Validate rating
-    if ($rating < 1 || $rating > 5) {
-        $_SESSION['error_message'] = "Invalid rating. Please rate between 1 and 5 stars.";
-    } else {
-        // Insert review
-        $sql = "INSERT INTO reviews (user_id, product_id, rating, comment) VALUES ($user_id, $product_id, $rating, '$comment')";
-        if ($conn->query($sql)) {
-            $_SESSION['success_message'] = "Your review has been submitted and is pending approval.";
-            redirect(SITE_URL . "/product.php?id=$product_id");
+    // Make sure user_id is available
+    if (isset($_SESSION['user_id'])) {
+        $user_id = $_SESSION['user_id'];
+        
+        // Validate rating
+        if ($rating < 1 || $rating > 5) {
+            $_SESSION['error_message'] = "Invalid rating. Please rate between 1 and 5 stars.";
         } else {
-            $_SESSION['error_message'] = "Error submitting review: " . $conn->error;
+            // Insert review
+            $sql = "INSERT INTO reviews (user_id, product_id, rating, comment) VALUES ($user_id, $product_id, $rating, '$comment')";
+            if ($conn->query($sql)) {
+                $_SESSION['success_message'] = "Your review has been submitted and is pending approval.";
+                redirect(SITE_URL . "/product.php?id=$product_id");
+            } else {
+                $_SESSION['error_message'] = "Error submitting review: " . $conn->error;
+            }
         }
+    } else {
+        $_SESSION['error_message'] = "You need to be logged in as a customer to leave a review.";
     }
 }
 

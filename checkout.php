@@ -75,10 +75,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             // Create order
             $shipping_address = "$address, $city, $zip";
-            $user_id = isLoggedIn() ? $_SESSION['user_id'] : 'NULL';
+            
+            // Handle user_id for SQL insertion
+            $user_id_value = "NULL"; // Default to NULL for guest checkout
+            if (isLoggedIn()) {
+                if (isset($_SESSION['user_id'])) {
+                    $user_id_value = $_SESSION['user_id']; // Use actual user_id if available
+                }
+                // Note: We don't create orders with admin_id
+            }
             
             $sql = "INSERT INTO orders (user_id, total_amount, status, shipping_address, payment_method) 
-                    VALUES ($user_id, $cartTotal, 'pending', '$shipping_address', '$payment_method')";
+                    VALUES ($user_id_value, $cartTotal, 'pending', '$shipping_address', '$payment_method')";
             $conn->query($sql);
             $order_id = $conn->insert_id;
             
@@ -132,12 +140,25 @@ $userData = [
 
 if (isLoggedIn()) {
     $conn = connectDB();
-    $user_id = $_SESSION['user_id'];
-    $sql = "SELECT name, email, phone, address FROM users WHERE id = $user_id";
-    $result = $conn->query($sql);
     
-    if ($result && $result->num_rows > 0) {
-        $userData = $result->fetch_assoc();
+    // Check which type of user is logged in and get the appropriate user ID
+    if (isset($_SESSION['user_id'])) {
+        $user_id = $_SESSION['user_id'];
+        $sql = "SELECT name, email, phone, address FROM users WHERE id = $user_id";
+        $result = $conn->query($sql);
+        
+        if ($result && $result->num_rows > 0) {
+            $userData = $result->fetch_assoc();
+        }
+    } elseif (isset($_SESSION['admin_id'])) {
+        // Admin user - could fetch admin data if needed
+        $admin_id = $_SESSION['admin_id'];
+        $sql = "SELECT username as name, 'admin@example.com' as email, '' as phone, '' as address FROM admin WHERE id = $admin_id";
+        $result = $conn->query($sql);
+        
+        if ($result && $result->num_rows > 0) {
+            $userData = $result->fetch_assoc();
+        }
     }
     
     $conn->close();

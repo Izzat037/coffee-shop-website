@@ -104,6 +104,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <div class="input-group">
                                     <span class="input-group-text"><i class="fas fa-lock"></i></span>
                                     <input type="password" class="form-control" id="password" name="password" required>
+                                    <button class="btn btn-outline-secondary toggle-password" type="button" data-target="password">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
                                 </div>
                                 <div class="invalid-feedback">
                                     Please enter your password.
@@ -146,6 +149,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }, false);
             });
         })();
+
+        // Show/hide password functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const toggleButtons = document.querySelectorAll('.toggle-password');
+            
+            toggleButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const targetId = this.getAttribute('data-target');
+                    const passwordInput = document.getElementById(targetId);
+                    const icon = this.querySelector('i');
+                    
+                    if (passwordInput.type === 'password') {
+                        passwordInput.type = 'text';
+                        icon.classList.remove('fa-eye');
+                        icon.classList.add('fa-eye-slash');
+                    } else {
+                        passwordInput.type = 'password';
+                        icon.classList.remove('fa-eye-slash');
+                        icon.classList.add('fa-eye');
+                    }
+                });
+            });
+        });
     </script>
 </body>
 </html> 
